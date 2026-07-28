@@ -1,0 +1,48 @@
+.ufdrive-box {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	margin: 20px 0;
+	padding: 4px 20px 16px;
+}
+
+.ufdrive-ok {
+	color: #007017;
+	font-weight: 600;
+}
+
+.ufdrive-bad {
+	color: #b32d2e;
+	font-weight: 600;
+}
+
+.ufdrive-log {
+	margin: 0;
+	max-height: 320px;
+	overflow-y: auto;
+}
+
+.ufdrive-log li {
+	border-bottom: 1px solid #f0f0f1;
+	font-size: 13px;
+	margin: 0;
+	padding: 6px 2px;
+}
+
+.ufdrive-log li:last-child {
+	border-bottom: 0;
+}
+
+.ufdrive-log code {
+	background: transparent;
+	color: #646970;
+	margin-right: 8px;
+}
+
+.ufdrive-log-error {
+	color: #b32d2e;
+}
+
+.ufdrive-log-warning {
+	color: #8a6100;
+}
