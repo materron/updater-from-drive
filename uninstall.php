@@ -13,5 +13,6 @@ delete_option( 'ufdrive_settings' );
 delete_option( 'ufdrive_log' );
 delete_option( 'ufdrive_last_run' );
 delete_option( 'ufdrive_skipped_fingerprint' );
+delete_transient( 'ufdrive_self_update' );
 
 wp_clear_scheduled_hook( 'ufdrive_daily_check' );

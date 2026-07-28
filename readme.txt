@@ -4,7 +4,7 @@ Tags: updates, google drive, updater, deployment
 Requires at least: 6.3
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -104,12 +104,27 @@ This plugin connects to Google Drive to list and download the plugin packages yo
 * **When:** when you press "Check the folder and update", and once a day if automatic updates are switched on.
 * **What is received:** the names, IDs, sizes and modification times of the packages in that folder, and the package contents themselves.
 
-No content from your site is ever sent to Google. No analytics, telemetry or usage data is transmitted anywhere. The plugin contacts no service other than Google Drive.
+No content from your site is ever sent to Google. No analytics, telemetry or usage data is transmitted anywhere.
 
 Google Terms of Service: https://policies.google.com/terms
 Google Privacy Policy: https://policies.google.com/privacy
 
+**Updater from Drive distribution directory** — https://potencia.pro/own-plugins/
+
+This plugin is not distributed through the WordPress.org directory, so it checks a plain web directory for new versions of itself. Without this, an installed copy would never learn that an update exists.
+
+* **What is sent:** nothing but the HTTP request itself. No site address, no identifier, no version number, no statistics. The request is indistinguishable from anyone opening that address in a browser.
+* **When:** at most once every twelve hours, when WordPress refreshes its list of available updates.
+* **What is received:** the directory listing, and the package itself when an update is installed.
+
+To point this at your own mirror instead, define `UFDRIVE_UPDATE_URL` in `wp-config.php`, or filter `ufdrive_update_source_url`. Site owners who would rather the plugin never contacted it can point it at a directory of their own.
+
+Potencia Pro Privacy Policy: https://potencia.pro/politicas-de-privacidad/
+
 == Changelog ==
+
+= 1.0.2 =
+* The plugin now keeps itself up to date from its own distribution directory.
 
 = 1.0.0 =
 * Initial release.

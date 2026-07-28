@@ -45,6 +45,24 @@ The API key can be kept out of the database with a constant in `wp-config.php`:
 define( 'UFDRIVE_API_KEY', 'AIza....' );
 ```
 
+## Updating the plugin itself
+
+This plugin is not in the WordPress.org directory, so it checks its own
+distribution directory for new versions and reports them to WordPress in the
+usual way — the update then appears on the Plugins screen like any other.
+
+The version lives only in the package file name, so there is no manifest to keep
+in step with the packages. The archive is still opened and checked before it
+replaces a working install.
+
+Point it somewhere else with a constant:
+
+```php
+define( 'UFDRIVE_UPDATE_URL', 'https://example.com/my-plugins/' );
+```
+
+or with the `ufdrive_update_source_url` filter.
+
 ## Requirements
 
 - WordPress 6.3 or newer

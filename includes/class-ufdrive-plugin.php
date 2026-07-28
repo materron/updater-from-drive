@@ -44,6 +44,11 @@ class UFDRIVE_Plugin {
 		add_action( 'admin_post_ufdrive_run_now', array( $this, 'handle_run_now' ) );
 		add_action( 'update_option_' . UFDRIVE_Settings::OPTION, array( $this, 'sync_schedule' ), 10, 0 );
 
+		// Registered outside the admin check too, so scheduled update checks
+		// and WP-CLI see the same available versions the dashboard does.
+		$self_updater = new UFDRIVE_Self_Updater();
+		$self_updater->hooks();
+
 		if ( is_admin() ) {
 			$admin = new UFDRIVE_Admin();
 			$admin->hooks();
