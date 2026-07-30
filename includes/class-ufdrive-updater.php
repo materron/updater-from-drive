@@ -76,6 +76,7 @@ class UFDRIVE_Updater {
 				'filename' => $file['name'],
 				'slug'     => $claim['slug'],
 				'version'  => $claim['version'],
+				'modified' => isset( $file['modifiedTime'] ) ? $file['modifiedTime'] : '',
 			);
 		}
 
@@ -122,9 +123,10 @@ class UFDRIVE_Updater {
 			require_once ABSPATH . 'wp-admin/includes/plugin.php';
 		}
 
-		$allowed = UFDRIVE_Settings::allowed_slugs();
-		$aliases = UFDRIVE_Settings::slug_aliases();
-		$pending = array();
+		$allowed    = UFDRIVE_Settings::allowed_slugs();
+		$lookup     = UFDRIVE_Matcher::build_lookup( $index );
+		$pending    = array();
+		$inspections = 0;
 
 		foreach ( get_plugins() as $plugin_file => $plugin_data ) {
 			$slug = dirname( $plugin_file );
@@ -140,16 +142,12 @@ class UFDRIVE_Updater {
 				continue;
 			}
 
-			// The package may be published under a different name than the
-			// folder the plugin installs into.
-			$package_slug = isset( $aliases[ $slug ] ) ? $aliases[ $slug ] : $slug;
-			$key          = strtolower( $package_slug );
+			$package = $this->resolve( $slug, $index, $lookup, $inspections );
 
-			if ( empty( $index[ $key ] ) ) {
+			if ( null === $package ) {
 				continue;
 			}
 
-			$package = $index[ $key ];
 			$current = isset( $plugin_data['Version'] ) ? $plugin_data['Version'] : '';
 
 			if ( '' === $current || ! version_compare( $package['version'], $current, '>' ) ) {
@@ -168,6 +166,220 @@ class UFDRIVE_Updater {
 		}
 
 		return $pending;
+	}
+
+	/**
+	 * Find the package belonging to an installed plugin.
+	 *
+	 * Cheapest sources first, and every answer that cost a download is kept so
+	 * it is never paid for twice.
+	 *
+	 * @param string                             $slug        Installed plugin folder.
+	 * @param array<string,array<string,string>> $index       Package index.
+	 * @param array<string,string>               $lookup      Loose lookup table.
+	 * @param int                                $inspections Running count of archives opened this run.
+	 * @return array<string,string>|null
+	 */
+	protected function resolve( $slug, array $index, array $lookup, &$inspections ) {
+		// What the site owner said, above anything the plugin works out.
+		$aliases = UFDRIVE_Settings::slug_aliases();
+
+		if ( isset( $aliases[ $slug ] ) ) {
+			$key = strtolower( $aliases[ $slug ] );
+			return isset( $index[ $key ] ) ? $index[ $key ] : null;
+		}
+
+		// What the plugin worked out on an earlier run.
+		$discovered = UFDRIVE_Matcher::discovered();
+
+		if ( isset( $discovered[ $slug ] ) ) {
+			$key = strtolower( $discovered[ $slug ] );
+
+			if ( isset( $index[ $key ] ) ) {
+				return $index[ $key ];
+			}
+		}
+
+		$by_name = UFDRIVE_Matcher::match_by_name( $slug, $index, $lookup );
+
+		if ( null !== $by_name ) {
+			return $by_name;
+		}
+
+		return $this->resolve_by_contents( $slug, $index, $inspections );
+	}
+
+	/**
+	 * Open strong candidates and see which one really is this plugin.
+	 *
+	 * @param string                             $slug        Installed plugin folder.
+	 * @param array<string,array<string,string>> $index       Package index.
+	 * @param int                                $inspections Running count of archives opened this run.
+	 * @return array<string,string>|null
+	 */
+	protected function resolve_by_contents( $slug, array $index, &$inspections ) {
+		foreach ( UFDRIVE_Matcher::candidates( $slug, $index ) as $package ) {
+			$inside = UFDRIVE_Matcher::inspected( $package['file_id'], $package['modified'] );
+
+			if ( null === $inside ) {
+				if ( $inspections >= UFDRIVE_Matcher::INSPECT_LIMIT ) {
+					break;
+				}
+
+				++$inspections;
+				$inside = $this->read_package_slug( $package );
+
+				UFDRIVE_Matcher::remember_inspection( $package['file_id'], $package['modified'], $inside );
+			}
+
+			if ( '' === $inside || ! UFDRIVE_Package::slugs_match( $inside, $slug ) ) {
+				continue;
+			}
+
+			UFDRIVE_Matcher::remember_alias( $slug, $package['slug'] );
+
+			UFDRIVE_Logger::log(
+				sprintf(
+					/* translators: 1: installed plugin folder, 2: package file name. */
+					__( 'Recognised %1$s inside the package %2$s. That pairing will be reused from now on.', 'updater-from-drive' ),
+					$slug,
+					$package['filename']
+				)
+			);
+
+			return $package;
+		}
+
+		return null;
+	}
+
+	/**
+	 * Download a package just far enough to learn which plugin it holds.
+	 *
+	 * @param array<string,string> $package Package descriptor.
+	 * @return string The plugin folder inside, or an empty string.
+	 */
+	protected function read_package_slug( array $package ) {
+		$temp = wp_tempnam( $package['filename'] );
+
+		if ( ! $temp ) {
+			return '';
+		}
+
+		$downloaded = $this->drive->download( $package['file_id'], $temp );
+
+		if ( is_wp_error( $downloaded ) ) {
+			wp_delete_file( $temp );
+			return '';
+		}
+
+		$inside = UFDRIVE_Package::inspect( $temp );
+		wp_delete_file( $temp );
+
+		return is_wp_error( $inside ) ? '' : $inside['slug'];
+	}
+
+	/**
+	 * Installed plugins and packages that could not be paired up.
+	 *
+	 * No amount of guessing turns woothemes-sensei into
+	 * woocommerce-paid-courses, so the site owner is shown what is left over
+	 * rather than being told everything is up to date.
+	 *
+	 * @param array<string,array<string,string>> $index Package index.
+	 * @return array{plugins:array<int,array<string,string>>,packages:array<int,array<string,string>>}
+	 */
+	public function unmatched( array $index ) {
+		if ( ! function_exists( 'get_plugins' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/plugin.php';
+		}
+
+		$lookup      = UFDRIVE_Matcher::build_lookup( $index );
+		$inspections = UFDRIVE_Matcher::INSPECT_LIMIT; // Reporting never downloads.
+		$plugins     = array();
+		$used        = array();
+		$elsewhere   = $this->plugins_updated_elsewhere();
+
+		foreach ( get_plugins() as $plugin_file => $plugin_data ) {
+			$slug = dirname( $plugin_file );
+
+			if ( '.' === $slug ) {
+				continue;
+			}
+
+			$package = $this->resolve( $slug, $index, $lookup, $inspections );
+
+			if ( null === $package ) {
+				// Plugins the WordPress.org directory already looks after are
+				// not missing from the folder, they simply do not belong in
+				// it. Listing them would bury the ones that matter.
+				if ( isset( $elsewhere[ $plugin_file ] ) ) {
+					continue;
+				}
+
+				$plugins[] = array(
+					'slug'    => $slug,
+					'name'    => isset( $plugin_data['Name'] ) ? $plugin_data['Name'] : $slug,
+					'version' => isset( $plugin_data['Version'] ) ? $plugin_data['Version'] : '',
+				);
+				continue;
+			}
+
+			$used[ strtolower( $package['slug'] ) ] = true;
+		}
+
+		$packages = array();
+
+		foreach ( $index as $key => $package ) {
+			if ( isset( $used[ $key ] ) ) {
+				continue;
+			}
+
+			$packages[] = array(
+				'slug'     => $package['slug'],
+				'version'  => $package['version'],
+				'filename' => $package['filename'],
+			);
+		}
+
+		return array(
+			'plugins'  => $plugins,
+			'packages' => $packages,
+		);
+	}
+
+	/**
+	 * Plugins that already have somewhere else to get updates from.
+	 *
+	 * WordPress records every plugin the directory recognises, whether or not
+	 * an update is pending. Anything it does not recognise is a plugin that
+	 * has to be updated from somewhere else, which is exactly what this plugin
+	 * is for.
+	 *
+	 * @return array<string,bool> Keyed by plugin file.
+	 */
+	protected function plugins_updated_elsewhere() {
+		$state = get_site_transient( 'update_plugins' );
+		$known = array();
+
+		if ( ! is_object( $state ) ) {
+			return $known;
+		}
+
+		foreach ( array( 'response', 'no_update' ) as $group ) {
+			if ( empty( $state->$group ) || ! is_array( $state->$group ) ) {
+				continue;
+			}
+
+			foreach ( array_keys( $state->$group ) as $plugin_file ) {
+				$known[ $plugin_file ] = true;
+			}
+		}
+
+		// This plugin looks after itself, so it is never "missing" either.
+		$known[ UFDRIVE_PLUGIN_BASENAME ] = true;
+
+		return $known;
 	}
 
 	/**
@@ -193,6 +405,10 @@ class UFDRIVE_Updater {
 		$result['checked'] = count( $index );
 		$pending           = $this->find_updates( $index );
 
+		// Recorded so the settings screen can show what could not be paired
+		// up, instead of quietly reporting that everything is up to date.
+		update_option( 'ufdrive_unmatched', $this->unmatched( $index ), false );
+
 		foreach ( $pending as $update ) {
 			$applied = $this->apply( $update );
 
@@ -202,6 +418,8 @@ class UFDRIVE_Updater {
 				continue;
 			}
 
+			// The version inside the archive is the one that actually landed.
+			$update['to']        = $applied;
 			$result['updated'][] = $update;
 
 			UFDRIVE_Logger::log(
@@ -234,7 +452,7 @@ class UFDRIVE_Updater {
 	 * Download, verify and install a single package.
 	 *
 	 * @param array<string,string> $update Update descriptor from find_updates().
-	 * @return true|WP_Error
+	 * @return string|WP_Error The version actually installed.
 	 */
 	protected function apply( array $update ) {
 		require_once ABSPATH . 'wp-admin/includes/file.php';
@@ -302,7 +520,7 @@ class UFDRIVE_Updater {
 
 		wp_clean_plugins_cache();
 
-		return true;
+		return $verified;
 	}
 
 	/**
@@ -314,7 +532,7 @@ class UFDRIVE_Updater {
 	 *
 	 * @param string               $zip_path Path to the downloaded package.
 	 * @param array<string,string> $update   Update descriptor.
-	 * @return true|WP_Error
+	 * @return string|WP_Error The version found inside the package.
 	 */
 	protected function verify( $zip_path, array $update ) {
 		$actual = UFDRIVE_Package::inspect( $zip_path );
@@ -331,10 +549,9 @@ class UFDRIVE_Updater {
 			);
 		}
 
-		$aliases       = UFDRIVE_Settings::slug_aliases();
-		$expected_slug = isset( $aliases[ $update['slug'] ] ) ? $aliases[ $update['slug'] ] : $update['slug'];
-
-		if ( ! UFDRIVE_Package::slugs_match( $actual['slug'], $expected_slug ) ) {
+		// Whatever folder is inside the archive is the folder WordPress will
+		// write to, so it has to be the plugin we set out to update.
+		if ( ! UFDRIVE_Package::slugs_match( $actual['slug'], $update['slug'] ) ) {
 			return new WP_Error(
 				'ufdrive_wrong_plugin',
 				sprintf(
@@ -347,19 +564,39 @@ class UFDRIVE_Updater {
 			);
 		}
 
-		if ( ! UFDRIVE_Package::slugs_match( $actual['version'], $update['to'] ) ) {
+		// The real version has to be an improvement on what is installed.
+		// Testing against the installed version rather than against the file
+		// name is what makes an endless update loop impossible: if installing
+		// this package cannot move the version forward, it is not installed.
+		if ( empty( $actual['version'] ) || ! version_compare( $actual['version'], $update['from'], '>' ) ) {
 			return new WP_Error(
-				'ufdrive_wrong_version',
+				'ufdrive_not_newer',
 				sprintf(
-					/* translators: 1: package file name, 2: version in the file name, 3: version inside the package. */
-					__( 'Nothing was updated. The file "%1$s" says it is version %2$s, but the plugin inside it is version %3$s. Rename the file so the version matches its contents.', 'updater-from-drive' ),
+					/* translators: 1: package file name, 2: version in the file name, 3: version inside the package, 4: installed version. */
+					__( 'Nothing was updated. The file "%1$s" says it is version %2$s, but the plugin inside it is version %3$s, which is no newer than the installed %4$s. Rename the file so the version matches its contents.', 'updater-from-drive' ),
 					$update['filename'],
 					$update['to'],
-					$actual['version']
+					empty( $actual['version'] ) ? '?' : $actual['version'],
+					$update['from']
 				)
 			);
 		}
 
-		return true;
+		// A mismatch that still moves forward is worth saying out loud, but
+		// not worth refusing: the contents are what actually gets installed.
+		if ( 0 !== version_compare( $actual['version'], $update['to'] ) ) {
+			UFDRIVE_Logger::log(
+				sprintf(
+					/* translators: 1: package file name, 2: version in the file name, 3: version inside the package. */
+					__( 'The file "%1$s" is named as version %2$s but contains version %3$s. The contents were used. Renaming the file will keep the two in step.', 'updater-from-drive' ),
+					$update['filename'],
+					$update['to'],
+					$actual['version']
+				),
+				'warning'
+			);
+		}
+
+		return $actual['version'];
 	}
 }

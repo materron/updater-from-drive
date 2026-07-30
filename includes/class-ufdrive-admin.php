@@ -300,6 +300,7 @@ class UFDRIVE_Admin {
 				?>
 			</form>
 			<?php $this->render_actions(); ?>
+			<?php $this->render_unmatched(); ?>
 			<?php $this->render_log(); ?>
 		</div>
 		<?php
@@ -361,6 +362,85 @@ class UFDRIVE_Admin {
 					<?php esc_html_e( 'Check the folder and update', 'updater-from-drive' ); ?>
 				</button>
 			</form>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Anything that could not be paired up, and a way to pair it by hand.
+	 *
+	 * Package names do not always resemble the folder a plugin installs into,
+	 * and some pairings cannot be guessed at all. Showing the leftovers turns
+	 * a silent "nothing to update" into something the site owner can act on.
+	 *
+	 * @return void
+	 */
+	protected function render_unmatched() {
+		$report = get_option( 'ufdrive_unmatched', array() );
+
+		if ( ! is_array( $report ) || empty( $report['plugins'] ) ) {
+			return;
+		}
+
+		$packages = isset( $report['packages'] ) && is_array( $report['packages'] ) ? $report['packages'] : array();
+		?>
+		<div class="ufdrive-box">
+			<h2><?php esc_html_e( 'Not paired up', 'updater-from-drive' ); ?></h2>
+			<p>
+				<?php esc_html_e( 'These installed plugins have no package in your folder that matches their name. If one of them is in there under a different name, pair them here and it will be remembered.', 'updater-from-drive' ); ?>
+			</p>
+
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<?php wp_nonce_field( 'ufdrive_save_mapping' ); ?>
+				<input type="hidden" name="action" value="ufdrive_save_mapping" />
+				<table class="widefat striped">
+					<thead>
+						<tr>
+							<th><?php esc_html_e( 'Installed plugin', 'updater-from-drive' ); ?></th>
+							<th><?php esc_html_e( 'Folder', 'updater-from-drive' ); ?></th>
+							<th><?php esc_html_e( 'Package in your Drive folder', 'updater-from-drive' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $report['plugins'] as $plugin ) : ?>
+							<tr>
+								<td><?php echo esc_html( $plugin['name'] ); ?></td>
+								<td><code><?php echo esc_html( $plugin['slug'] ); ?></code></td>
+								<td>
+									<select name="mapping[<?php echo esc_attr( $plugin['slug'] ); ?>]">
+										<option value=""><?php esc_html_e( '— not in my folder —', 'updater-from-drive' ); ?></option>
+										<?php foreach ( $packages as $package ) : ?>
+											<option value="<?php echo esc_attr( $package['slug'] ); ?>">
+												<?php echo esc_html( $package['filename'] ); ?>
+											</option>
+										<?php endforeach; ?>
+									</select>
+								</td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+				<?php submit_button( __( 'Save pairings', 'updater-from-drive' ), 'secondary' ); ?>
+			</form>
+
+			<?php if ( ! empty( $packages ) ) : ?>
+				<p class="description">
+					<?php
+					echo esc_html(
+						sprintf(
+							/* translators: %d: number of packages. */
+							_n(
+								'%d package in your folder does not correspond to anything installed on this site. That is normal if you keep packages for other sites in the same folder.',
+								'%d packages in your folder do not correspond to anything installed on this site. That is normal if you keep packages for other sites in the same folder.',
+								count( $packages ),
+								'updater-from-drive'
+							),
+							count( $packages )
+						)
+					);
+					?>
+				</p>
+			<?php endif; ?>
 		</div>
 		<?php
 	}

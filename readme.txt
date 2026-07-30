@@ -4,7 +4,7 @@ Tags: updates, google drive, updater, deployment
 Requires at least: 6.3
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.0.2
+Stable tag: 1.0.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,8 +29,9 @@ Because the file name is a claim rather than a fact, the archive is opened and c
 * The first part must match the folder the plugin installs into, not its display name. Contact Form 7 lives in `contact-form-7`.
 * The version can be `1.2`, `1.2.3`, `1.2.3.4` or `2.0-beta`, with or without a leading `v`.
 * Files that do not follow this pattern are ignored, and listed in the activity log so you can spot them.
+* Decorative endings are understood: a package named `something-plugin` will be matched to a plugin installed in `something`, and punctuation is ignored, so `gravity-forms-quiz` finds `gravityformsquiz`.
 
-If a package genuinely has to be named differently from the folder it installs into, you can declare that pairing in the settings.
+Some pairings cannot be guessed from a name at all: nothing suggests that `woothemes-sensei` is published as `woocommerce-paid-courses`. Those are listed on the settings screen so you can pair them yourself, once.
 
 = What it will and will not do =
 
@@ -122,6 +123,11 @@ To point this at your own mirror instead, define `UFDRIVE_UPDATE_URL` in `wp-con
 Potencia Pro Privacy Policy: https://potencia.pro/politicas-de-privacidad/
 
 == Changelog ==
+
+= 1.0.3 =
+* Packages whose name does not match the folder a plugin installs into are now recognised anyway. Astra Pro is published as astra-addon-plugin but installs into astra-addon; that pairing, and others like it, no longer need setting up by hand.
+* Plugins that could not be paired with any package are listed on the settings screen, with a way to pair them in one step. Previously a plugin with a mismatched name was silently never updated.
+* A package whose contents disagree with its file name is now used if it still moves the version forward, and the discrepancy is logged rather than refusing the update outright.
 
 = 1.0.2 =
 * The plugin now keeps itself up to date from its own distribution directory.
